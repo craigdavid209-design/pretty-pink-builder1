@@ -1,0 +1,168 @@
+name: Pretty Pink 1.1.5 Math Candidate
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+    paths:
+      - '.github/workflows/build-math-candidate.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out builder repository
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Gradle 8.9
+        uses: gradle/actions/setup-gradle@v6
+        with:
+          gradle-version: '8.9'
+
+      - name: Restore verified 1.1.4 listening-test source
+        shell: bash
+        run: |
+          awk '/cat > source.tar.xz.b64/{flag=1;next} flag && /PRETTY_PINK_SOURCE/{exit} flag {sub(/^          /,""); print}' .github/workflows/build.yml > source.tar.xz.b64
+          base64 -d source.tar.xz.b64 > source.tar.xz
+          tar -xJf source.tar.xz
+          rm -f source.tar.xz source.tar.xz.b64
+
+      - name: Apply 1.1.5 math candidate patch
+        shell: bash
+        run: |
+          cat > /tmp/apply_candidate.py <<'PY'
+          from pathlib import Path
+          
+          def replace(path, old, new):
+              p=Path(path); s=p.read_text()
+              if old not in s:
+                  raise SystemExit(f'candidate patch anchor missing: {path}: {old[:80]!r}')
+              p.write_text(s.replace(old,new,1))
+          
+          # Isolated candidate identity.
+          replace('app/build.gradle',
+          '''    defaultConfig {
+                  applicationId 'com.prettypink.player.listeningtest'
+                  minSdk 26
+                  targetSdk 35
+                  versionCode 52
+                  versionName '1.1.4-listening-test'
+              }''',
+          '''    defaultConfig {
+                  applicationId 'com.prettypink.player.mathcandidate'
+                  minSdk 26
+                  targetSdk 35
+                  versionCode 53
+                  versionName '1.1.5-math-candidate'
+              }''')
+          replace('app/src/main/AndroidManifest.xml', 'android:label="Pretty Pink Listening Test"', 'android:label="Pretty Pink Math Candidate"')
+          
+          # Scanner: ask Android for float PCM first; fall back to 16-bit only when float configuration is unsupported.
+          replace('app/src/main/java/com/prettypink/player/Scanner.java',
+          ' static ScanResult scan(Context context,Uri uri,Listener listener)throws Exception{return decode(context,uri,listener,false);}',
+          ' static ScanResult scan(Context context,Uri uri,Listener listener)throws Exception{return decode(context,uri,listener);}')
+          replace('app/src/main/java/com/prettypink/player/Scanner.java',
+          ' private static ScanResult decode(Context context,Uri uri,Listener listener,boolean preferFloat)throws Exception{',
+          ' private static ScanResult decode(Context context,Uri uri,Listener listener)throws Exception{')
+          replace('app/src/main/java/com/prettypink/player/Scanner.java',
+          '''   format.setInteger(MediaFormat.KEY_PCM_ENCODING,preferFloat?AudioFormat.ENCODING_PCM_FLOAT:AudioFormat.ENCODING_PCM_16BIT);\n   codec=MediaCodec.createDecoderByType(mime);codec.configure(format,null,null,0);codec.start();''',
+          '''   try{\n    format.setInteger(MediaFormat.KEY_PCM_ENCODING,AudioFormat.ENCODING_PCM_FLOAT);\n    codec=MediaCodec.createDecoderByType(mime);codec.configure(format,null,null,0);codec.start();\n   }catch(Exception unsupportedFloat){\n    if(codec!=null){try{codec.release();}catch(Exception ignored){}codec=null;}\n    format.setInteger(MediaFormat.KEY_PCM_ENCODING,AudioFormat.ENCODING_PCM_16BIT);\n    codec=MediaCodec.createDecoderByType(mime);codec.configure(format,null,null,0);codec.start();\n   }''')
+          
+          # Balance: attenuation-only all the way down; no dormant quiet-section lifting.
+          replace('app/src/main/java/com/prettypink/player/GainPolicy.java',
+          '''     * Optional verified Balance layer for unusually variable material.\n     * It gently narrows short-term contrast around the track's integrated\n     * reference, while remaining attenuation-only and globally peak-safe.''',
+          '''     * Optional verified Balance layer for unusually hot sections.\n     * Quiet passages remain at the static reference. Balance may add only a\n     * small prepared attenuation and remains globally peak-safe.''')
+          replace('app/src/main/java/com/prettypink/player/GainPolicy.java',
+          '? Math.max(-1.0, Math.min(1.5, adjustment))',
+          '? Math.max(-1.0, Math.min(0.0, adjustment))')
+          replace('app/src/main/java/com/prettypink/player/GainPolicy.java',
+          '''        if (difference < -2.5) {\n            return Math.min(1.5, (-difference - 2.5) * 0.20);\n        }\n''','')
+          replace('app/src/main/java/com/prettypink/player/GainPolicy.java',
+          'return Math.max(-1.0, Math.min(1.5, a + (b - a) * (point - lo)));',
+          'return Math.max(-1.0, Math.min(0.0, a + (b - a) * (point - lo)));')
+          replace('app/src/main/java/com/prettypink/player/GainPolicy.java',
+          '''    /** Slow symmetric glide: at most 0.12 dB per second. */\n    public static double balanceStep(double current, double target, double seconds) {\n        if (!Double.isFinite(current) || !Double.isFinite(target)\n                || !Double.isFinite(seconds) || seconds <= 0.0) {\n            return 0.0;\n        }\n        double delta = target - current;\n        double limit = 0.12 * seconds;\n        return current + Math.max(-limit, Math.min(limit, delta));\n    }''',
+          '''    /** Slow attenuation-only glide: at most 0.12 dB per second. */\n    public static double balanceStep(double current, double target, double seconds) {\n        if (!Double.isFinite(current) || !Double.isFinite(target)\n                || !Double.isFinite(seconds) || seconds <= 0.0) {\n            return 0.0;\n        }\n        double safeCurrent = Math.max(-1.0, Math.min(0.0, current));\n        double safeTarget = Math.max(-1.0, Math.min(0.0, target));\n        double delta = safeTarget - safeCurrent;\n        double limit = 0.12 * seconds;\n        return Math.max(-1.0, Math.min(0.0,\n                safeCurrent + Math.max(-limit, Math.min(limit, delta))));\n    }''')
+          
+          # Public source comment must describe Core versus the optional predictive Balance layer accurately.
+          replace('app/src/main/java/com/prettypink/player/PrettyPink.java',
+          ''' * Pretty Pink applies static attenuation only. It does not boost, EQ, compress,\n * limit, dynamically ride gain, reshape transients, or rewrite source audio.\n * This preserves the recording's relative dynamics and spectral balance while\n * changing only the playback level required by the selected policy.''',
+          ''' * Pretty Pink Core applies static attenuation only. It does not boost, EQ,\n * compress, limit, reshape transients, or rewrite source audio. The optional\n * predictive Balance layer lives outside Core and may add only a tiny prepared\n * attenuation to exceptional hot sections; it never lifts quiet passages.\n * This preserves spectral balance and the recording's intended contrast while\n * changing playback level only when the selected policy justifies it.''')
+          PY
+          python3 /tmp/apply_candidate.py
+          rm -f /tmp/apply_candidate.py
+
+      - name: Run attenuation-only candidate checks
+        shell: bash
+        run: |
+          mkdir -p /tmp/ppcheck/com/prettypink/player
+          cat > /tmp/ppcheck/com/prettypink/player/CandidateCheck.java <<'JAVA'
+          package com.prettypink.player;
+          public final class CandidateCheck {
+            private static void check(boolean ok,String m){if(!ok)throw new AssertionError(m);}
+            public static void main(String[] a){
+              double core=PrettyPink.trackGain(-8.0,-18.0,1.2);
+              check(GainPolicy.applyBalance(core,1.2,1.5)==core,"positive Balance input lifted static reference");
+              check(GainPolicy.balanceTargetAdjustment(-18.0,-30.0)==0.0,"quiet scene requested positive gain");
+              check(GainPolicy.balanceAt(new double[]{0.4,0.2},500)==0.0,"positive curve data escaped clamp");
+              check(GainPolicy.balanceStep(0.0,1.0,1.0)==0.0,"positive step target escaped clamp");
+              double[] hot=new double[200];
+              double base=Math.pow(10.0,(-18.0+.691)/10.0), event=Math.pow(10.0,(-4.0+.691)/10.0);
+              java.util.Arrays.fill(hot,base); for(int i=100;i<112;i++)hot[i]=event;
+              double[] curve=GainPolicy.buildBalanceCurve(-18.0,hot);
+              for(double x:curve)check(Double.isFinite(x)&&x<=0.0&&x>=-1.0,"prepared Balance curve left attenuation-only bounds");
+              System.out.println("PASS Pretty Pink 1.1.5 attenuation-only candidate checks");
+            }
+          }
+          JAVA
+          javac --release 8 -d /tmp/ppcheck \
+            app/src/main/java/com/prettypink/player/PrettyPink.java \
+            app/src/main/java/com/prettypink/player/GainPolicy.java \
+            app/src/main/java/com/prettypink/player/ScanResult.java \
+            app/src/main/java/com/prettypink/player/Loudness.java \
+            app/src/main/java/com/prettypink/player/PeakMeter.java \
+            /tmp/ppcheck/com/prettypink/player/CandidateCheck.java
+          java -cp /tmp/ppcheck com.prettypink.player.CandidateCheck
+
+      - name: Refuse private keys or test music
+        shell: bash
+        run: |
+          if find . -type f \( -iname '*.p12' -o -iname '*.jks' -o -iname '*.keystore' -o -iname '*.flac' -o -iname '*.mp3' -o -iname '*.m4a' -o -iname '*.wav' \) -print -quit | grep -q .; then
+            echo 'Refusing to build: private key or test media found in candidate workspace.' >&2
+            exit 1
+          fi
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v4
+        with:
+          packages: ''
+
+      - name: Ensure Android SDK 35 is installed
+        shell: bash
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platforms;android-35" "build-tools;35.0.0"
+
+      - name: Build isolated debug APK
+        run: gradle --no-daemon :app:assembleDebug
+
+      - name: Name the APK
+        run: cp app/build/outputs/apk/debug/app-debug.apk Pretty-Pink-1.1.5-Math-Candidate.apk
+
+      - name: Upload the APK
+        uses: actions/upload-artifact@v4.6.2
+        with:
+          name: Pretty-Pink-1.1.5-Math-Candidate
+          path: Pretty-Pink-1.1.5-Math-Candidate.apk
+          if-no-files-found: error
+          retention-days: 7
