@@ -1,0 +1,201 @@
+name: Pretty Pink GitHub UI Test 1.1.5
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+    paths:
+      - '.github/workflows/Pretty-Pink-GitHub-UI-Test-1.1.5-Builder.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out builder repository
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Gradle 8.9
+        uses: gradle/actions/setup-gradle@v6
+        with:
+          gradle-version: '8.9'
+
+      - name: Restore verified 1.1.4 listening-test source
+        shell: bash
+        run: |
+          awk '/cat > source.tar.xz.b64/{flag=1;next} flag && /PRETTY_PINK_SOURCE/{exit} flag {sub(/^          /,""); print}' \
+            .github/workflows/build.yml > source.tar.xz.b64
+          base64 -d source.tar.xz.b64 > source.tar.xz
+          tar -xJf source.tar.xz
+          rm -f source.tar.xz source.tar.xz.b64
+
+      - name: Recreate exact 1.1.5 listening champion
+        shell: bash
+        run: |
+          awk '/cat > \/tmp\/apply_candidate.py <<'"'"'PY'"'"'/{flag=1;next} flag && /^          PY$/{exit} flag {sub(/^          /,""); print}' \
+            .github/workflows/Pretty-Pink-1.1.5-Math-Candidate-GitHub-Builder.yml > /tmp/apply_candidate.py
+          python3 /tmp/apply_candidate.py
+          rm -f /tmp/apply_candidate.py
+
+      - name: Verify exact 1.1.5 audio-engine hashes
+        shell: bash
+        run: |
+          cat > /tmp/expected-audio.sha256 <<'EOF'
+          c35c3750a7a4cfec21dbabf45f14a882a49b142a37e84669b3625b395b51bcb4  app/src/main/java/com/prettypink/player/PrettyPink.java
+          fe08c10d8341f726d62104d21189937f63ea56ccd7b1e50a21efde5cd5729609  app/src/main/java/com/prettypink/player/GainPolicy.java
+          c1f6ba386e6f761e21a1dd8d18b595dcfd29ceb6f8ed92970fc144385c95bcf6  app/src/main/java/com/prettypink/player/Loudness.java
+          bcb63634aefde1eb301da9d3ca8df001803035cace9ca248b44a1c4bcf08f914  app/src/main/java/com/prettypink/player/PeakMeter.java
+          aa5385504808dba51b6be690d043827b1501e7777b145956db3bbc09e1574763  app/src/main/java/com/prettypink/player/AlbumPolicy.java
+          5170c3679bd8e6d204d9b8692b62ca3363259c1ad3351e62c936aede5cca0ded  app/src/main/java/com/prettypink/player/PlayerService.java
+          4f365a1b108c1c31c37e952492fc8aeca577e839555180465cce20256fab38dd  app/src/main/java/com/prettypink/player/Scanner.java
+          b306f0bcadbb983ae39e2accaad5f0a76d16ba176a9b773022acc53704209d00  app/src/main/java/com/prettypink/player/AnalysisCache.java
+          62b2d9dcfe21fae9049c106e687cbe7b249973d9eb5057d360d7eadc03cdc3b9  app/src/main/java/com/prettypink/player/ScanResult.java
+          d6b6b03c5ced82aaac55d76ee37ed4d530530e9d5eb5fa7b45971d58bb33a088  app/src/main/java/com/prettypink/player/Pcm.java
+          8e1176a57499efd6379efdac64a08a0355e93c03f259b9c7098d6ee4cb2fbbd3  app/src/main/java/com/prettypink/player/FlacInfo.java
+          EOF
+          sed -i 's/^          //' /tmp/expected-audio.sha256
+          sha256sum -c /tmp/expected-audio.sha256
+
+      - name: Apply visual-only GitHub UI test patch
+        shell: bash
+        run: |
+          cat > /tmp/ui_patch.py <<'PY'
+          from pathlib import Path
+
+          def replace(path, old, new):
+              p=Path(path); s=p.read_text()
+              if old not in s:
+                  raise SystemExit(f'UI patch anchor missing: {path}: {old[:100]!r}')
+              p.write_text(s.replace(old,new,1))
+
+          replace('app/build.gradle',
+              "applicationId 'com.prettypink.player.mathcandidate'",
+              "applicationId 'com.prettypink.player.githubuitest'")
+          replace('app/build.gradle',
+              "versionCode 53",
+              "versionCode 57")
+          replace('app/build.gradle',
+              "versionName '1.1.5-math-candidate'",
+              "versionName '1.1.5-github-ui-test'")
+          replace('app/src/main/AndroidManifest.xml',
+              'android:label="Pretty Pink Math Candidate"',
+              'android:label="Pretty Pink GitHub UI Test"')
+
+          # Restore the original glossy Pretty Pink launcher already present in
+          # the verified 1.1.4 listening-test source.
+          Path('app/src/main/res/mipmap-anydpi-v26/launcher.xml').write_text(
+              '<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">'
+              '<background android:drawable="@color/launcher_pink"/>'
+              '<foreground android:drawable="@drawable/glossy_launcher"/>'
+              '</adaptive-icon>\n')
+
+          # Unknown albums: soft modern card + the pure Pretty Pink brand heart.
+          Path('app/src/main/res/drawable/album_placeholder.xml').write_text('''<vector xmlns:android="http://schemas.android.com/apk/res/android"
+              android:width="108dp" android:height="108dp"
+              android:viewportWidth="108" android:viewportHeight="108">
+              <path android:fillColor="#F8D7E5" android:pathData="M0,0h108v108h-108z"/>
+              <path android:fillColor="#FFF2F7" android:pathData="M14,14h80a14,14 0,0 1,14 14v52a14,14 0,0 1,-14 14h-80a14,14 0,0 1,-14 -14v-52a14,14 0,0 1,14 -14z"/>
+              <path android:fillColor="#E83483" android:pathData="M54,82C49,77 25,63 25,44C25,29 43,24 54,38C65,24 83,29 83,44C83,63 59,77 54,82Z"/>
+          </vector>\n''')
+
+          p=Path('app/src/main/java/com/prettypink/player/MainActivity.java')
+          s=p.read_text().replace('R.drawable.icon','R.drawable.album_placeholder')
+          s=s.replace('Jane And David Edition · 1.1.4\\nPretty Pink Core 1.0 · your music, still itself',
+                      'Jane And David Edition · GitHub UI Test\\n1.1.5 listening champion · your music, still itself')
+          p.write_text(s)
+
+          Path('GITHUB-UI-TEST-NOTES.md').write_text('''# Pretty Pink GitHub UI Test\n\nVisual-only test build based on the exact 1.1.5 listening champion.\n\n- Original glossy Pretty Pink launcher restored.\n- Modern pure-heart placeholder for albums without artwork.\n- Isolated test package; can coexist with other candidates.\n- Audio/DSP source intentionally unchanged.\n\nThis is a test edition, not the final public release.\n''')
+          PY
+          python3 /tmp/ui_patch.py
+          rm -f /tmp/ui_patch.py
+
+      - name: Prove audio engine stayed byte-for-byte unchanged
+        shell: bash
+        run: |
+          sha256sum -c /tmp/expected-audio.sha256
+          test -f app/src/main/res/drawable-nodpi/glossy_music_icon.png
+          test -f app/src/main/res/drawable/glossy_launcher.xml
+          echo 'c04d476cf36ff534f7eadc99f567dfb46df46fb9fc4567d784b7b563f86fa353  app/src/main/res/drawable-nodpi/glossy_music_icon.png' | sha256sum -c -
+          grep -Fq '@drawable/glossy_launcher' app/src/main/res/mipmap-anydpi-v26/launcher.xml
+          grep -Fq 'R.drawable.album_placeholder' app/src/main/java/com/prettypink/player/MainActivity.java
+          grep -Fq "versionName '1.1.5-github-ui-test'" app/build.gradle
+
+      - name: Run 1.1.5 attenuation-only checks
+        shell: bash
+        run: |
+          mkdir -p /tmp/ppcheck/com/prettypink/player
+          cat > /tmp/ppcheck/com/prettypink/player/CandidateCheck.java <<'JAVA'
+          package com.prettypink.player;
+          public final class CandidateCheck {
+            private static void check(boolean ok,String m){if(!ok)throw new AssertionError(m);}
+            public static void main(String[] a){
+              double core=PrettyPink.trackGain(-8.0,-18.0,1.2);
+              check(GainPolicy.applyBalance(core,1.2,1.5)==core,"positive Balance input lifted static reference");
+              check(GainPolicy.balanceTargetAdjustment(-18.0,-30.0)==0.0,"quiet scene requested positive gain");
+              check(GainPolicy.balanceAt(new double[]{0.4,0.2},500)==0.0,"positive curve data escaped clamp");
+              check(GainPolicy.balanceStep(0.0,1.0,1.0)==0.0,"positive step target escaped clamp");
+              double[] hot=new double[200];
+              double base=Math.pow(10.0,(-18.0+.691)/10.0), event=Math.pow(10.0,(-4.0+.691)/10.0);
+              java.util.Arrays.fill(hot,base); for(int i=100;i<112;i++)hot[i]=event;
+              double[] curve=GainPolicy.buildBalanceCurve(-18.0,hot);
+              for(double x:curve)check(Double.isFinite(x)&&x<=0.0&&x>=-1.0,"prepared Balance curve left attenuation-only bounds");
+              System.out.println("PASS Pretty Pink 1.1.5 listening-champion checks");
+            }
+          }
+          JAVA
+          javac --release 8 -d /tmp/ppcheck \
+            app/src/main/java/com/prettypink/player/PrettyPink.java \
+            app/src/main/java/com/prettypink/player/GainPolicy.java \
+            app/src/main/java/com/prettypink/player/ScanResult.java \
+            app/src/main/java/com/prettypink/player/Loudness.java \
+            app/src/main/java/com/prettypink/player/PeakMeter.java \
+            /tmp/ppcheck/com/prettypink/player/CandidateCheck.java
+          java -cp /tmp/ppcheck com.prettypink.player.CandidateCheck
+
+      - name: Refuse private keys or test music
+        shell: bash
+        run: |
+          if find . -type f \( -iname '*.p12' -o -iname '*.jks' -o -iname '*.keystore' -o -iname '*.flac' -o -iname '*.mp3' -o -iname '*.m4a' -o -iname '*.wav' \) -print -quit | grep -q .; then
+            echo 'Refusing to build: private key or test media found in candidate workspace.' >&2
+            exit 1
+          fi
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v4
+        with:
+          packages: ''
+
+      - name: Ensure Android SDK 35 is installed
+        shell: bash
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platforms;android-35" "build-tools;35.0.0"
+
+      - name: Build isolated debug APK
+        run: gradle --no-daemon :app:assembleDebug
+
+      - name: Name and hash the APK
+        shell: bash
+        run: |
+          cp app/build/outputs/apk/debug/app-debug.apk Pretty-Pink-GitHub-UI-Test-1.1.5.apk
+          sha256sum Pretty-Pink-GitHub-UI-Test-1.1.5.apk > Pretty-Pink-GitHub-UI-Test-1.1.5.sha256
+          cat Pretty-Pink-GitHub-UI-Test-1.1.5.sha256
+
+      - name: Upload the APK and checksum
+        uses: actions/upload-artifact@v4.6.2
+        with:
+          name: Pretty-Pink-GitHub-UI-Test-1.1.5
+          path: |
+            Pretty-Pink-GitHub-UI-Test-1.1.5.apk
+            Pretty-Pink-GitHub-UI-Test-1.1.5.sha256
+          if-no-files-found: error
+          retention-days: 7
