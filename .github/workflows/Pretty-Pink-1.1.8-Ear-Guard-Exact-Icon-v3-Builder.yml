@@ -1,0 +1,289 @@
+name: Pretty Pink 1.1.8 Ear Guard Exact Icon v3
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+    paths:
+      - '.github/workflows/Pretty-Pink-1.1.8-Ear-Guard-Exact-Icon-v3-Builder.yml'
+      - '.github/workflows/Pretty-Pink-Glossy-Icon-Exact.png'
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    steps:
+      - name: Check out builder repository
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Gradle 8.9
+        uses: gradle/actions/setup-gradle@v6
+        with:
+          gradle-version: '8.9'
+
+      - name: Restore exact tested 1.1.8 Ear Guard source
+        shell: bash
+        run: |
+          awk '/cat > source.tar.xz.b64/{flag=1;next} flag && /PRETTY_PINK_SOURCE/{exit} flag {sub(/^          /,""); print}' \
+            .github/workflows/Pretty-Pink-1.1.8-Ear-Guard-Candidate-GitHub-Builder.yml > source.tar.xz.b64
+          test -s source.tar.xz.b64
+          base64 -d source.tar.xz.b64 > source.tar.xz
+          tar -xJf source.tar.xz
+          rm -f source.tar.xz source.tar.xz.b64
+
+      - name: Verify exact 1.1.8 Ear Guard identity
+        shell: bash
+        run: |
+          grep -Fq "applicationId 'com.prettypink.player.earguard'" app/build.gradle
+          grep -Fq "versionName '1.1.8-ear-guard-candidate'" app/build.gradle
+          grep -Fq 'MEASUREMENT_SCHEMA_VERSION=5' app/src/main/java/com/prettypink/player/AnalysisCache.java
+          grep -Fq 'section + 1.80' app/src/main/java/com/prettypink/player/GainPolicy.java
+          grep -Fq 'fastExcess * .55 * fastConfidence' app/src/main/java/com/prettypink/player/GainPolicy.java
+          grep -Fq 'target <= -20.0 ? 0.85 : 1.0' app/src/main/java/com/prettypink/player/GainPolicy.java
+          echo 'PASS exact 1.1.8 Ear Guard restored'
+
+      - name: Freeze audio and in-app resources before launcher patch
+        shell: bash
+        run: |
+          find app/src/main/java -type f -print0 | sort -z | xargs -0 sha256sum > /tmp/java-before.sha256
+          find app/src/main/res -type f \
+            ! -path '*/mipmap-anydpi/launcher.xml' \
+            ! -path '*/mipmap-anydpi/launcher_round.xml' \
+            ! -path '*/mipmap-anydpi-v26/launcher.xml' \
+            ! -path '*/mipmap-anydpi-v26/launcher_round.xml' \
+            ! -path '*/drawable/glossy_launcher_fill.xml' \
+            ! -path '*/drawable-nodpi/glossy_music_icon.png' \
+            ! -path '*/drawable-nodpi/glossy_music_icon_composite.png' \
+            -print0 | sort -z | xargs -0 sha256sum > /tmp/res-before.sha256
+
+      - name: Build Samsung-safe composite from exact artwork
+        shell: bash
+        run: |
+          test -f .github/workflows/Pretty-Pink-Glossy-Icon-Exact.png
+          mkdir -p app/src/main/res/drawable-nodpi
+
+          cat > /tmp/ExactIcon.java <<'JAVA'
+          import java.awt.*;
+          import java.awt.image.BufferedImage;
+          import java.io.File;
+          import javax.imageio.ImageIO;
+
+          public final class ExactIcon {
+            public static void main(String[] args) throws Exception {
+              BufferedImage src = ImageIO.read(new File(args[0]));
+              if (src == null) throw new IllegalStateException("Could not decode exact Pretty Pink icon");
+              if (src.getWidth() != 1536 || src.getHeight() != 1536) {
+                throw new IllegalStateException("Expected exact 1536x1536 source; got " +
+                  src.getWidth() + "x" + src.getHeight());
+              }
+
+              int size = 1536;
+
+              // Full-bleed pink canvas keeps Samsung's launcher tile visually full size.
+              // This color is sampled from the pink edge field of the exact artwork.
+              BufferedImage dst = new BufferedImage(size, size, BufferedImage.TYPE_INT_ARGB);
+              Graphics2D g = dst.createGraphics();
+              g.setColor(new Color(252, 127, 190));
+              g.fillRect(0, 0, size, size);
+
+              // Keep the ORIGINAL artwork intact, simply fitting it to 92% of the
+              // adaptive canvas so the heart/sparkles survive Samsung's mask.
+              int fitted = Math.round(size * 0.92f);
+              int inset = (size - fitted) / 2;
+
+              g.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BICUBIC);
+              g.setRenderingHint(RenderingHints.KEY_RENDERING, RenderingHints.VALUE_RENDER_QUALITY);
+              g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+
+              // Remove only the baked black corner field while drawing. Pink artwork,
+              // highlights, shadows, music note, heart, bars, waves, and sparkles
+              // remain exactly from the user's source image.
+              BufferedImage clean = new BufferedImage(size, size, BufferedImage.TYPE_INT_ARGB);
+              for (int y = 0; y < size; y++) {
+                for (int x = 0; x < size; x++) {
+                  int rgb = src.getRGB(x, y);
+                  int r = (rgb >> 16) & 255;
+                  int gg = (rgb >> 8) & 255;
+                  int b = rgb & 255;
+                  int max = Math.max(r, Math.max(gg, b));
+                  int alpha;
+                  if (max <= 10) alpha = 0;
+                  else if (max >= 36) alpha = 255;
+                  else alpha = Math.round((max - 10) * 255f / 26f);
+                  clean.setRGB(x, y, (alpha << 24) | (r << 16) | (gg << 8) | b);
+                }
+              }
+
+              g.drawImage(clean, inset, inset, fitted, fitted, null);
+              g.dispose();
+
+              if (!ImageIO.write(dst, "png", new File(args[1]))) {
+                throw new IllegalStateException("PNG writer unavailable");
+              }
+            }
+          }
+          JAVA
+
+          javac /tmp/ExactIcon.java
+          java -Djava.awt.headless=true -cp /tmp ExactIcon \
+            .github/workflows/Pretty-Pink-Glossy-Icon-Exact.png \
+            app/src/main/res/drawable-nodpi/glossy_music_icon_composite.png
+
+      - name: Apply launcher-only adaptive icon patch
+        shell: bash
+        run: |
+          cat > /tmp/icon_patch.py <<'PY'
+          from pathlib import Path
+          import re
+
+          gradle = Path('app/build.gradle')
+          s = gradle.read_text()
+
+          s, n = re.subn(
+              r"applicationId\s+'com\.prettypink\.player\.earguard'",
+              "applicationId 'com.prettypink.player.earguard.exacticonv3'",
+              s, count=1
+          )
+          if n != 1:
+              raise SystemExit('Could not patch Ear Guard applicationId')
+
+          m = re.search(r'versionCode\s+(\d+)', s)
+          if not m:
+              raise SystemExit('Could not locate versionCode')
+          s = re.sub(r'versionCode\s+\d+',
+                     f'versionCode {int(m.group(1)) + 2}', s, count=1)
+
+          s, n = re.subn(
+              r"versionName\s+'1\.1\.8-ear-guard-candidate'",
+              "versionName '1.1.8-ear-guard-exact-icon-v3'",
+              s, count=1
+          )
+          if n != 1:
+              raise SystemExit('Could not patch 1.1.8 versionName')
+          gradle.write_text(s)
+
+          manifest = Path('app/src/main/AndroidManifest.xml')
+          s = manifest.read_text()
+          s = s.replace(
+              'android:label="Pretty Pink Ear Guard"',
+              'android:label="Pretty Pink 1.1.8 Exact Icon"',
+              1
+          )
+
+          if re.search(r'android:icon="[^"]+"', s):
+              s = re.sub(r'android:icon="[^"]+"',
+                         'android:icon="@mipmap/launcher"', s, count=1)
+          else:
+              s = s.replace('<application',
+                            '<application android:icon="@mipmap/launcher"', 1)
+
+          if re.search(r'android:roundIcon="[^"]+"', s):
+              s = re.sub(r'android:roundIcon="[^"]+"',
+                         'android:roundIcon="@mipmap/launcher"', s, count=1)
+          else:
+              s = s.replace(
+                  'android:icon="@mipmap/launcher"',
+                  'android:icon="@mipmap/launcher" android:roundIcon="@mipmap/launcher"',
+                  1
+              )
+          manifest.write_text(s)
+
+          legacy = Path('app/src/main/res/mipmap-anydpi')
+          legacy.mkdir(parents=True, exist_ok=True)
+          bitmap = '''<bitmap xmlns:android="http://schemas.android.com/apk/res/android"
+              android:src="@drawable/glossy_music_icon_composite"
+              android:gravity="fill"
+              android:antialias="true"
+              android:dither="true"
+              android:filter="true" />
+          '''
+          (legacy / 'launcher.xml').write_text(bitmap)
+          (legacy / 'launcher_round.xml').write_text(bitmap)
+
+          drawable = Path('app/src/main/res/drawable')
+          drawable.mkdir(parents=True, exist_ok=True)
+          (drawable / 'glossy_launcher_fill.xml').write_text(bitmap)
+
+          adaptive = Path('app/src/main/res/mipmap-anydpi-v26')
+          adaptive.mkdir(parents=True, exist_ok=True)
+          adaptive_xml = '''<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+              <background android:drawable="@drawable/glossy_launcher_fill"/>
+              <foreground android:drawable="@android:color/transparent"/>
+          </adaptive-icon>
+          '''
+          (adaptive / 'launcher.xml').write_text(adaptive_xml)
+          (adaptive / 'launcher_round.xml').write_text(adaptive_xml)
+
+          Path('EXACT-ICON-V3-NOTES.md').write_text(
+              '# Pretty Pink 1.1.8 Exact Icon v3\n\n'
+              'Uses David and Jane’s exact 1536x1536 glossy artwork as the source. '
+              'No redrawing or generated replacement art. The build removes only '
+              'the baked black corner field and fits the original artwork to 92% '
+              'inside a full-bleed matching pink adaptive canvas. Exact 1.1.8 '
+              'Ear Guard audio and in-app resources remain protected.\n'
+          )
+          PY
+
+          python3 /tmp/icon_patch.py
+          rm -f /tmp/icon_patch.py
+
+      - name: Prove audio and in-app resources stayed unchanged
+        shell: bash
+        run: |
+          sha256sum -c /tmp/java-before.sha256
+          sha256sum -c /tmp/res-before.sha256
+          grep -Fq "applicationId 'com.prettypink.player.earguard.exacticonv3'" app/build.gradle
+          grep -Fq "versionName '1.1.8-ear-guard-exact-icon-v3'" app/build.gradle
+          grep -Fq 'android:icon="@mipmap/launcher"' app/src/main/AndroidManifest.xml
+          grep -Fq 'android:roundIcon="@mipmap/launcher"' app/src/main/AndroidManifest.xml
+          grep -Fq '@drawable/glossy_launcher_fill' app/src/main/res/mipmap-anydpi-v26/launcher.xml
+          echo 'PASS exact 1.1.8 audio + in-app resources preserved'
+
+      - name: Refuse private keys or test music
+        shell: bash
+        run: |
+          if find . -type f \( -iname '*.p12' -o -iname '*.jks' -o -iname '*.keystore' -o -iname '*.flac' -o -iname '*.mp3' -o -iname '*.m4a' -o -iname '*.wav' \) -print -quit | grep -q .; then
+            echo 'Refusing to build: private key or test media found in candidate workspace.' >&2
+            exit 1
+          fi
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v4
+        with:
+          packages: ''
+
+      - name: Ensure Android SDK 35 is installed
+        shell: bash
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platforms;android-35" "build-tools;35.0.0"
+
+      - name: Build isolated debug APK
+        run: gradle --no-daemon :app:assembleDebug
+
+      - name: Name and hash APK
+        shell: bash
+        run: |
+          cp app/build/outputs/apk/debug/app-debug.apk Pretty-Pink-1.1.8-Ear-Guard-Exact-Icon-v3.apk
+          sha256sum Pretty-Pink-1.1.8-Ear-Guard-Exact-Icon-v3.apk > Pretty-Pink-1.1.8-Ear-Guard-Exact-Icon-v3.sha256
+          cat Pretty-Pink-1.1.8-Ear-Guard-Exact-Icon-v3.sha256
+
+      - name: Upload APK and checksum
+        uses: actions/upload-artifact@v4.6.2
+        with:
+          name: Pretty-Pink-1.1.8-Ear-Guard-Exact-Icon-v3
+          path: |
+            Pretty-Pink-1.1.8-Ear-Guard-Exact-Icon-v3.apk
+            Pretty-Pink-1.1.8-Ear-Guard-Exact-Icon-v3.sha256
+          if-no-files-found: error
+          retention-days: 7
