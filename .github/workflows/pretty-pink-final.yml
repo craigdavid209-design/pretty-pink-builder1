@@ -1,4 +1,4 @@
-name: Pretty Pink 1.1.8 Final Candidate v7
+name: Pretty Pink 1.1.8 Final Candidate v8
 
 on:
   workflow_dispatch:
@@ -135,7 +135,7 @@ jobs:
 
           s, n = re.subn(
               r"applicationId\s+'com\.prettypink\.player\.earguard'",
-              "applicationId 'com.prettypink.player.finalcandidatev7'",
+              "applicationId 'com.prettypink.player.finalcandidatev8'",
               s, count=1
           )
           if n != 1:
@@ -145,11 +145,11 @@ jobs:
           if not m:
               raise SystemExit('Could not locate versionCode')
           s = re.sub(r'versionCode\s+\d+',
-                     f'versionCode {int(m.group(1)) + 14}', s, count=1)
+                     f'versionCode {int(m.group(1)) + 15}', s, count=1)
 
           s, n = re.subn(
               r"versionName\s+'1\.1\.8-ear-guard-candidate'",
-              "versionName '1.1.8-final-candidate-v7'",
+              "versionName '1.1.8-final-candidate-v8'",
               s, count=1
           )
           if n != 1:
@@ -238,7 +238,7 @@ jobs:
           (adaptive / 'launcher_round.xml').write_text(adaptive_xml)
 
           Path('RELEASE-CANDIDATE-1-NOTES.md').write_text(
-              '# Pretty Pink 1.1.8 Final Candidate v7\n\n'
+              '# Pretty Pink 1.1.8 Final Candidate v8\n\n'
               'This is a true two-layer adaptive icon. The full launcher tile is '
               'a matching Pretty Pink background. David and Jane’s exact source '
               'art is preserved as a separate transparent-corner foreground with '
@@ -675,7 +675,7 @@ jobs:
           echo 'PASS current track artwork is published to MediaSession for Android/Samsung media controls'
 
 
-      - name: Standardize Now Playing heart to the home HeartMark
+      - name: Standardize every branded heart to the home HeartMark
         shell: bash
         run: |
           cat > /tmp/heart_patch.py <<'PYHEART'
@@ -684,205 +684,229 @@ jobs:
 
           path = Path('app/src/main/java/com/prettypink/player/MainActivity.java')
           text = path.read_text()
+          target = '"Pretty Pink ♥"'
 
-          def method_span(source, method_name):
-              m = re.search(
-                  rf'(?m)^[ \t]*(?:private|public|protected)[^\n]*\b{re.escape(method_name)}\s*\([^)]*\)\s*\{{',
-                  source
-              )
-              if not m:
-                  raise SystemExit(f'Could not find method: {method_name}')
+          def method_span_containing(source, pos):
+              # Find the nearest method declaration before pos and its balanced body.
+              matches = list(re.finditer(
+                  r'(?m)^[ \t]*(?:private|public|protected)[^\n]*\b'
+                  r'([A-Za-z_][A-Za-z0-9_]*)\s*\([^;{}]*\)\s*\{',
+                  source[:pos + 1]
+              ))
+              if not matches:
+                  raise SystemExit('Could not identify enclosing method for branded heart')
+              m = matches[-1]
               open_brace = source.find('{', m.start())
               depth = 0
-              in_string = False
-              in_char = False
+              mode = 'code'
               escape = False
               for i in range(open_brace, len(source)):
                   ch = source[i]
-                  if in_string or in_char:
+                  if mode == 'string':
                       if escape:
                           escape = False
                       elif ch == '\\':
                           escape = True
-                      elif in_string and ch == '"':
-                          in_string = False
-                      elif in_char and ch == "'":
-                          in_char = False
+                      elif ch == '"':
+                          mode = 'code'
+                      continue
+                  if mode == 'char':
+                      if escape:
+                          escape = False
+                      elif ch == '\\':
+                          escape = True
+                      elif ch == "'":
+                          mode = 'code'
                       continue
                   if ch == '"':
-                      in_string = True
+                      mode = 'string'
                   elif ch == "'":
-                      in_char = True
+                      mode = 'char'
                   elif ch == '{':
                       depth += 1
                   elif ch == '}':
                       depth -= 1
                       if depth == 0:
-                          return m.start(), i + 1
-              raise SystemExit(f'Could not find end of method: {method_name}')
+                          return m.group(1), m.start(), i + 1
+              raise SystemExit('Could not close enclosing method for branded heart')
 
-          # Home page is the source of truth.
-          brand_a, brand_b = method_span(text, 'brand')
-          brand_method = text[brand_a:brand_b]
-          if 'new HeartMark()' not in brand_method:
-              raise SystemExit('Home brand no longer uses HeartMark; refusing cosmetic patch')
-
-          now_a, now_b = method_span(text, 'nowPlaying')
-          now = text[now_a:now_b]
-          target = '"Pretty Pink ♥"'
-
-          if now.count(target) != 1:
-              raise SystemExit(f'Expected exactly one Now Playing text-heart; found {now.count(target)}')
-
-          target_pos = now.index(target)
-
-          # Find the complete Java statement containing the old text-heart.
-          # Do not assume it fits on one source line or begins with a specific type keyword.
-          prev_semi = now.rfind(';', 0, target_pos)
-          prev_open = now.rfind('{', 0, target_pos)
-          prev_close = now.rfind('}', 0, target_pos)
-          stmt_start = max(prev_semi, prev_open, prev_close) + 1
-
-          stmt_end = now.find(';', target_pos)
-          if stmt_end < 0:
-              raise SystemExit('Could not find end of statement containing Now Playing text-heart')
-
-          statement = now[stmt_start:stmt_end + 1]
-          if '{' in statement or '}' in statement:
-              raise SystemExit('Unexpected control-flow inside Now Playing text-heart statement')
-
-          # The statement must assign a text(...) result to one local variable.
-          assign = re.search(
-              r'\b(?P<var>[A-Za-z_][A-Za-z0-9_]*)\s*=\s*(?:this\.)?text\s*\(',
-              statement,
-              re.DOTALL
+          # Home brand is the source of truth.
+          brand = re.search(
+              r'(?m)^[ \t]*(?:private|public|protected)[^\n]*\bbrand\s*\([^)]*\)\s*\{',
+              text
           )
-          if not assign:
-              raise SystemExit(
-                  'Could not identify the variable assigned by the Now Playing text-heart statement'
+          if not brand:
+              raise SystemExit('Could not find home brand()')
+          bopen = text.find('{', brand.start())
+          probe = text[bopen:bopen + 1800]
+          if 'new HeartMark()' not in probe:
+              raise SystemExit('Home brand() no longer uses HeartMark; refusing cosmetic patch')
+
+          initial = text.count(target)
+          if initial < 1:
+              raise SystemExit('No old Pretty Pink text-heart headers found to standardize')
+
+          patched = []
+          safety = 0
+
+          while target in text:
+              safety += 1
+              if safety > 12:
+                  raise SystemExit('Too many branded-heart iterations; refusing broad patch')
+
+              pos = text.index(target)
+              method_name, method_a, method_b = method_span_containing(text, pos)
+              body = text[method_a:method_b]
+              local_pos = pos - method_a
+
+              # Find the statement containing the target.
+              prev_semi = body.rfind(';', 0, local_pos)
+              prev_open = body.rfind('{', 0, local_pos)
+              prev_close = body.rfind('}', 0, local_pos)
+              stmt_start = max(prev_semi, prev_open, prev_close) + 1
+              stmt_end = body.find(';', local_pos)
+              if stmt_end < 0:
+                  raise SystemExit(f'{method_name}: no semicolon after branded-heart statement')
+
+              statement = body[stmt_start:stmt_end + 1]
+              if '{' in statement or '}' in statement:
+                  raise SystemExit(f'{method_name}: unexpected brace in branded-heart declaration')
+
+              assign = re.search(
+                  r'\b(?P<var>[A-Za-z_][A-Za-z0-9_]*)\s*=\s*(?:this\.)?text\s*\(',
+                  statement, re.DOTALL
               )
-          var = assign.group('var')
+              if not assign:
+                  raise SystemExit(
+                      f'{method_name}: could not identify TextView variable for branded heart'
+                  )
+              var = assign.group('var')
 
-          # Preserve the declaration block's indentation.
-          first_code = re.search(r'(?m)^(?P<indent>[ \t]*)\S', statement)
-          indent = first_code.group('indent') if first_code else '        '
+              first_code = re.search(r'(?m)^(?P<indent>[ \t]*)\S', statement)
+              indent = first_code.group('indent') if first_code else '        '
 
-          # Locate the subsequent addView(var, ...) even when its arguments span lines.
-          search_tail = now[stmt_end + 1:]
-          add = re.search(
-              rf'(?P<parent>[A-Za-z_][A-Za-z0-9_]*)\.addView\s*\(\s*'
-              rf'{re.escape(var)}\b\s*(?:,|\))',
-              search_tail,
-              re.DOTALL
-          )
-          if not add:
-              raise SystemExit(
-                  f'Could not locate addView() for Now Playing heart variable {var}'
+              # Find the matching addView(var, ...) within this method only.
+              tail = body[stmt_end + 1:]
+              add = re.search(
+                  rf'(?P<parent>[A-Za-z_][A-Za-z0-9_]*)\.addView\s*\(\s*'
+                  rf'{re.escape(var)}\b\s*(?:,|\))',
+                  tail, re.DOTALL
               )
+              if not add:
+                  raise SystemExit(
+                      f'{method_name}: could not locate addView() for branded-heart variable {var}'
+                  )
 
-          add_abs_start = stmt_end + 1 + add.start()
-          parent = add.group('parent')
+              add_start = stmt_end + 1 + add.start()
+              parent = add.group('parent')
 
-          # Find the exact end of this addView(...) statement using balanced parentheses.
-          open_paren = now.find('(', add_abs_start)
-          if open_paren < 0:
-              raise SystemExit('Malformed addView() while patching Now Playing heart')
+              # Balanced parentheses for that exact addView call.
+              open_paren = body.find('(', add_start)
+              if open_paren < 0:
+                  raise SystemExit(f'{method_name}: malformed addView()')
 
-          depth = 0
-          close_paren = None
-          mode = 'code'
-          escape = False
-
-          for i in range(open_paren, len(now)):
-              ch = now[i]
-              if mode == 'string':
-                  if escape:
-                      escape = False
-                  elif ch == '\\':
-                      escape = True
-                  elif ch == '"':
-                      mode = 'code'
-                  continue
-              if mode == 'char':
-                  if escape:
-                      escape = False
-                  elif ch == '\\':
-                      escape = True
+              depth = 0
+              close_paren = None
+              mode = 'code'
+              escape = False
+              for i in range(open_paren, len(body)):
+                  ch = body[i]
+                  if mode == 'string':
+                      if escape:
+                          escape = False
+                      elif ch == '\\':
+                          escape = True
+                      elif ch == '"':
+                          mode = 'code'
+                      continue
+                  if mode == 'char':
+                      if escape:
+                          escape = False
+                      elif ch == '\\':
+                          escape = True
+                      elif ch == "'":
+                          mode = 'code'
+                      continue
+                  if ch == '"':
+                      mode = 'string'
                   elif ch == "'":
-                      mode = 'code'
-                  continue
+                      mode = 'char'
+                  elif ch == '(':
+                      depth += 1
+                  elif ch == ')':
+                      depth -= 1
+                      if depth == 0:
+                          close_paren = i
+                          break
 
-              if ch == '"':
-                  mode = 'string'
-              elif ch == "'":
-                  mode = 'char'
-              elif ch == '(':
-                  depth += 1
-              elif ch == ')':
-                  depth -= 1
-                  if depth == 0:
-                      close_paren = i
-                      break
+              if close_paren is None:
+                  raise SystemExit(f'{method_name}: could not close addView()')
 
-          if close_paren is None:
-              raise SystemExit('Could not find end of Now Playing addView()')
+              add_semi = body.find(';', close_paren)
+              if add_semi < 0:
+                  raise SystemExit(f'{method_name}: no semicolon after addView()')
 
-          add_semi = now.find(';', close_paren)
-          if add_semi < 0:
-              raise SystemExit('Could not find semicolon after Now Playing addView()')
+              block = body[stmt_start:add_semi + 1]
 
-          # Fail closed before replacing the contiguous title block.
-          block = now[stmt_start:add_semi + 1]
-          if len(block) > 1800:
-              raise SystemExit('Now Playing heart block is unexpectedly large; refusing cosmetic patch')
-          if block.count(target) != 1:
-              raise SystemExit('Now Playing heart block does not contain exactly one target string')
-          if '{' in block or '}' in block:
-              raise SystemExit('Unexpected braces in Now Playing heart block; refusing cosmetic patch')
+              # Tight fail-closed guards: this must remain a tiny header styling block.
+              if len(block) > 2000:
+                  raise SystemExit(f'{method_name}: branded-heart block unexpectedly large')
+              if block.count(target) != 1:
+                  raise SystemExit(f'{method_name}: branded-heart block target count changed')
+              if '{' in block or '}' in block:
+                  raise SystemExit(f'{method_name}: control-flow braces found near branded heart')
 
-          scrub = re.sub(r'/\*.*?\*/', '', block, flags=re.DOTALL)
-          scrub = re.sub(r'//[^\n]*', '', scrub)
-          if re.search(r'\b(if|for|while|switch|try|catch|return|throw|break|continue)\b', scrub):
-              raise SystemExit('Unexpected control-flow keyword in Now Playing heart block')
+              scrub = re.sub(r'/\*.*?\*/', '', block, flags=re.DOTALL)
+              scrub = re.sub(r'//[^\n]*', '', scrub)
+              if re.search(
+                  r'\b(if|for|while|switch|try|catch|return|throw|break|continue)\b',
+                  scrub
+              ):
+                  raise SystemExit(f'{method_name}: control-flow keyword found near branded heart')
+              if len(re.findall(r'\baddView\s*\(', scrub)) != 1:
+                  raise SystemExit(f'{method_name}: expected exactly one addView() in heart block')
 
-          if len(re.findall(r'\baddView\s*\(', scrub)) != 1:
-              raise SystemExit('Expected exactly one addView() in Now Playing heart block')
+              leading = statement[:len(statement) - len(statement.lstrip())]
+              replacement = (
+                  leading
+                  + 'android.widget.LinearLayout prettyPinkPageBrand = brand();\n'
+                  + f'{indent}prettyPinkPageBrand.setGravity(android.view.Gravity.CENTER);\n'
+                  + f'{indent}prettyPinkPageBrand.setPadding(0, dp(6), 0, dp(10));\n'
+                  + f'{indent}{parent}.addView(prettyPinkPageBrand);'
+              )
 
-          leading = statement[:len(statement) - len(statement.lstrip())]
-          replacement = (
-              leading
-              + f'android.widget.LinearLayout prettyPinkNowPlayingBrand = brand();\n'
-              + f'{indent}prettyPinkNowPlayingBrand.setGravity(android.view.Gravity.CENTER);\n'
-              + f'{indent}prettyPinkNowPlayingBrand.setPadding(0, dp(6), 0, dp(10));\n'
-              + f'{indent}{parent}.addView(prettyPinkNowPlayingBrand);'
-          )
+              new_body = body[:stmt_start] + replacement + body[add_semi + 1:]
+              text = text[:method_a] + new_body + text[method_b:]
 
-          new_now = now[:stmt_start] + replacement + now[add_semi + 1:]
+              patched.append((method_name, var, parent, len(block)))
 
-          if target in new_now:
-              raise SystemExit('Old Unicode text-heart survived Now Playing patch')
-          if 'prettyPinkNowPlayingBrand = brand();' not in new_now:
-              raise SystemExit('Home HeartMark brand was not installed in Now Playing')
+          if text.count(target) != 0:
+              raise SystemExit('Old Pretty Pink Unicode heart survived all-pages pass')
+          if len(patched) != initial:
+              raise SystemExit(
+                  f'Patched {len(patched)} heart blocks but started with {initial} targets'
+              )
 
-          text = text[:now_a] + new_now + text[now_b:]
           path.write_text(text)
 
-          print(
-              f'PASS replaced Now Playing text-heart block: variable={var}, parent={parent}, '
-              f'block_chars={len(block)}'
-          )
+          print(f'PASS standardized {len(patched)} branded heart header(s)')
+          for method_name, var, parent, chars in patched:
+              print(
+                  f'  {method_name}: variable={var}, parent={parent}, block_chars={chars}'
+              )
           PYHEART
 
           python3 /tmp/heart_patch.py
           rm -f /tmp/heart_patch.py
 
-          grep -Fq 'prettyPinkNowPlayingBrand = brand();' app/src/main/java/com/prettypink/player/MainActivity.java
           grep -Fq 'new HeartMark()' app/src/main/java/com/prettypink/player/MainActivity.java
           if grep -Fq '"Pretty Pink ♥"' app/src/main/java/com/prettypink/player/MainActivity.java; then
-            echo 'Old Now Playing Unicode heart survived unexpectedly.' >&2
+            echo 'Old Pretty Pink Unicode heart survived unexpectedly.' >&2
             exit 1
           fi
-          echo 'PASS Now Playing reuses the exact home HeartMark brand'
+          grep -Fq 'prettyPinkPageBrand = brand();' app/src/main/java/com/prettypink/player/MainActivity.java
+
+          echo 'PASS every old branded text-heart now reuses the exact home HeartMark'
 
       - name: Restore explicit cross-check agreement in Behind the Sound
         shell: bash
@@ -955,8 +979,8 @@ jobs:
         run: |
           sha256sum -c /tmp/java-before.sha256
           sha256sum -c /tmp/res-before.sha256
-          grep -Fq "applicationId 'com.prettypink.player.finalcandidatev7'" app/build.gradle
-          grep -Fq "versionName '1.1.8-final-candidate-v7'" app/build.gradle
+          grep -Fq "applicationId 'com.prettypink.player.finalcandidatev8'" app/build.gradle
+          grep -Fq "versionName '1.1.8-final-candidate-v8'" app/build.gradle
           grep -Fq 'android:icon="@mipmap/launcher"' app/src/main/AndroidManifest.xml
           grep -Fq 'android:roundIcon="@mipmap/launcher"' app/src/main/AndroidManifest.xml
           grep -Fq '@drawable/launcher_pink_safe' app/src/main/res/mipmap-anydpi-v26/launcher.xml
@@ -989,16 +1013,16 @@ jobs:
       - name: Name and hash APK
         shell: bash
         run: |
-          cp app/build/outputs/apk/debug/app-debug.apk Pretty-Pink-1.1.8-Final-Candidate-v7.apk
-          sha256sum Pretty-Pink-1.1.8-Final-Candidate-v7.apk > Pretty-Pink-1.1.8-Final-Candidate-v7.sha256
-          cat Pretty-Pink-1.1.8-Final-Candidate-v7.sha256
+          cp app/build/outputs/apk/debug/app-debug.apk Pretty-Pink-1.1.8-Final-Candidate-v8.apk
+          sha256sum Pretty-Pink-1.1.8-Final-Candidate-v8.apk > Pretty-Pink-1.1.8-Final-Candidate-v8.sha256
+          cat Pretty-Pink-1.1.8-Final-Candidate-v8.sha256
 
       - name: Upload APK and checksum
         uses: actions/upload-artifact@v4.6.2
         with:
-          name: Pretty-Pink-1.1.8-Final-Candidate-v7
+          name: Pretty-Pink-1.1.8-Final-Candidate-v8
           path: |
-            Pretty-Pink-1.1.8-Final-Candidate-v7.apk
-            Pretty-Pink-1.1.8-Final-Candidate-v7.sha256
+            Pretty-Pink-1.1.8-Final-Candidate-v8.apk
+            Pretty-Pink-1.1.8-Final-Candidate-v8.sha256
           if-no-files-found: error
           retention-days: 7
