@@ -1,4 +1,4 @@
-name: Pretty Pink 1.1.8 Final Candidate v11
+name: Pretty Pink 1.1.8 Final Candidate v12
 
 on:
   workflow_dispatch:
@@ -58,8 +58,10 @@ jobs:
           find app/src/main/java -type f \
             ! -path '*/MainActivity.java' \
             ! -path '*/PlayerService.java' \
+            ! -path '*/Scanner.java' \
             -print0 | sort -z | xargs -0 sha256sum > /tmp/java-before.sha256
           cp app/src/main/java/com/prettypink/player/PlayerService.java /tmp/PlayerService.before.java
+          cp app/src/main/java/com/prettypink/player/Scanner.java /tmp/Scanner.before.java
           find app/src/main/res -type f \
             ! -path '*/mipmap-anydpi/launcher.xml' \
             ! -path '*/mipmap-anydpi/launcher_round.xml' \
@@ -135,7 +137,7 @@ jobs:
 
           s, n = re.subn(
               r"applicationId\s+'com\.prettypink\.player\.earguard'",
-              "applicationId 'com.prettypink.player.finalcandidatev11'",
+              "applicationId 'com.prettypink.player.finalcandidatev12'",
               s, count=1
           )
           if n != 1:
@@ -145,11 +147,11 @@ jobs:
           if not m:
               raise SystemExit('Could not locate versionCode')
           s = re.sub(r'versionCode\s+\d+',
-                     f'versionCode {int(m.group(1)) + 18}', s, count=1)
+                     f'versionCode {int(m.group(1)) + 19}', s, count=1)
 
           s, n = re.subn(
               r"versionName\s+'1\.1\.8-ear-guard-candidate'",
-              "versionName '1.1.8-final-candidate-v11'",
+              "versionName '1.1.8-final-candidate-v12'",
               s, count=1
           )
           if n != 1:
@@ -238,7 +240,7 @@ jobs:
           (adaptive / 'launcher_round.xml').write_text(adaptive_xml)
 
           Path('RELEASE-CANDIDATE-1-NOTES.md').write_text(
-              '# Pretty Pink 1.1.8 Final Candidate v11\n\n'
+              '# Pretty Pink 1.1.8 Final Candidate v12\n\n'
               'This is a true two-layer adaptive icon. The full launcher tile is '
               'a matching Pretty Pink background. David and Jane’s exact source '
               'art is preserved as a separate transparent-corner foreground with '
@@ -983,19 +985,61 @@ jobs:
 
           echo 'PASS existing lightweight verifier preserved; Behind the Sound states agreement explicitly'
 
+      - name: Prove Scanner logic is exact except approved Behind the Sound wording
+        shell: bash
+        run: |
+          python3 - <<'PYSCANNER'
+          from pathlib import Path
+
+          before = Path('/tmp/Scanner.before.java').read_text()
+          current_path = Path('app/src/main/java/com/prettypink/player/Scanner.java')
+          current = current_path.read_text()
+
+          old = 'Cross-check:'
+          new = 'Cross-check: agrees with primary measurement ·'
+
+          if before.count(old) != 1:
+              raise SystemExit(
+                  f'Expected one original Cross-check: label in tested 1.1.8 Scanner; '
+                  f'found {before.count(old)}'
+              )
+
+          if current.count(new) != 1:
+              raise SystemExit(
+                  f'Expected exactly one approved verifier-agreement label; '
+                  f'found {current.count(new)}'
+              )
+
+          if 'Measurement verification disagreed' not in current:
+              raise SystemExit('Measurement disagreement fail-closed path disappeared')
+
+          # Reverse ONLY the approved human-readable prefix. The result must be
+          # byte-for-byte identical to the exact tested 1.1.8 Scanner.java.
+          restored = current.replace(new, old, 1)
+          if restored != before:
+              raise SystemExit(
+                  'Scanner.java changed beyond the one approved Behind-the-Sound label'
+              )
+
+          print(
+              'PASS Scanner.java is byte-for-byte exact 1.1.8 after reversing '
+              'only the approved verifier-agreement display string'
+          )
+          PYSCANNER
+
       - name: Prove exact DSP and untouched Java stayed unchanged
         shell: bash
         run: |
           sha256sum -c /tmp/java-before.sha256
           sha256sum -c /tmp/res-before.sha256
-          grep -Fq "applicationId 'com.prettypink.player.finalcandidatev11'" app/build.gradle
-          grep -Fq "versionName '1.1.8-final-candidate-v11'" app/build.gradle
+          grep -Fq "applicationId 'com.prettypink.player.finalcandidatev12'" app/build.gradle
+          grep -Fq "versionName '1.1.8-final-candidate-v12'" app/build.gradle
           grep -Fq 'android:icon="@mipmap/launcher"' app/src/main/AndroidManifest.xml
           grep -Fq 'android:roundIcon="@mipmap/launcher"' app/src/main/AndroidManifest.xml
           grep -Fq '@drawable/launcher_pink_safe' app/src/main/res/mipmap-anydpi-v26/launcher.xml
           grep -Fq '@drawable/glossy_launcher_foreground' app/src/main/res/mipmap-anydpi-v26/launcher.xml
           grep -Fq 'android:insetLeft="12dp"' app/src/main/res/drawable/glossy_launcher_foreground.xml
-          echo 'PASS exact 1.1.8 DSP and all untouched Java preserved; only approved UI + media-art integration changed'
+          echo 'PASS exact 1.1.8 DSP and untouched Java preserved; Scanner differs only by the approved display string; approved UI + media-art integration verified'
 
       - name: Refuse private keys or test music
         shell: bash
@@ -1022,16 +1066,16 @@ jobs:
       - name: Name and hash APK
         shell: bash
         run: |
-          cp app/build/outputs/apk/debug/app-debug.apk Pretty-Pink-1.1.8-Final-Candidate-v11.apk
-          sha256sum Pretty-Pink-1.1.8-Final-Candidate-v11.apk > Pretty-Pink-1.1.8-Final-Candidate-v11.sha256
-          cat Pretty-Pink-1.1.8-Final-Candidate-v11.sha256
+          cp app/build/outputs/apk/debug/app-debug.apk Pretty-Pink-1.1.8-Final-Candidate-v12.apk
+          sha256sum Pretty-Pink-1.1.8-Final-Candidate-v12.apk > Pretty-Pink-1.1.8-Final-Candidate-v12.sha256
+          cat Pretty-Pink-1.1.8-Final-Candidate-v12.sha256
 
       - name: Upload APK and checksum
         uses: actions/upload-artifact@v4.6.2
         with:
-          name: Pretty-Pink-1.1.8-Final-Candidate-v11
+          name: Pretty-Pink-1.1.8-Final-Candidate-v12
           path: |
-            Pretty-Pink-1.1.8-Final-Candidate-v11.apk
-            Pretty-Pink-1.1.8-Final-Candidate-v11.sha256
+            Pretty-Pink-1.1.8-Final-Candidate-v12.apk
+            Pretty-Pink-1.1.8-Final-Candidate-v12.sha256
           if-no-files-found: error
           retention-days: 7
