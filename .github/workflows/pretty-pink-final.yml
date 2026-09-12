@@ -1,4 +1,4 @@
-name: Pretty Pink 1.1.8 Final Candidate v6
+name: Pretty Pink 1.1.8 Final Candidate v7
 
 on:
   workflow_dispatch:
@@ -135,7 +135,7 @@ jobs:
 
           s, n = re.subn(
               r"applicationId\s+'com\.prettypink\.player\.earguard'",
-              "applicationId 'com.prettypink.player.finalcandidatev6'",
+              "applicationId 'com.prettypink.player.finalcandidatev7'",
               s, count=1
           )
           if n != 1:
@@ -145,11 +145,11 @@ jobs:
           if not m:
               raise SystemExit('Could not locate versionCode')
           s = re.sub(r'versionCode\s+\d+',
-                     f'versionCode {int(m.group(1)) + 13}', s, count=1)
+                     f'versionCode {int(m.group(1)) + 14}', s, count=1)
 
           s, n = re.subn(
               r"versionName\s+'1\.1\.8-ear-guard-candidate'",
-              "versionName '1.1.8-final-candidate-v6'",
+              "versionName '1.1.8-final-candidate-v7'",
               s, count=1
           )
           if n != 1:
@@ -238,7 +238,7 @@ jobs:
           (adaptive / 'launcher_round.xml').write_text(adaptive_xml)
 
           Path('RELEASE-CANDIDATE-1-NOTES.md').write_text(
-              '# Pretty Pink 1.1.8 Final Candidate v6\n\n'
+              '# Pretty Pink 1.1.8 Final Candidate v7\n\n'
               'This is a true two-layer adaptive icon. The full launcher tile is '
               'a matching Pretty Pink background. David and Jane’s exact source '
               'art is preserved as a separate transparent-corner foreground with '
@@ -499,39 +499,6 @@ jobs:
           grep -Fq 'not calibrated hearing-safety settings' app/src/main/java/com/prettypink/player/MainActivity.java
           echo 'PASS public Settings story and listening copy refined'
 
-
-      - name: Restore explicit cross-check agreement in Behind the Sound
-        shell: bash
-        run: |
-          cat > /tmp/cross_check_copy_patch.py <<'PYCROSS'
-          from pathlib import Path
-
-          path = Path('app/src/main/java/com/prettypink/player/MainActivity.java')
-          text = path.read_text()
-
-          old = '"Cross-check: 100 ms hops "'
-          new = '"Cross-check: agrees with primary measurement · 100 ms hops "'
-
-          count = text.count(old)
-          if count != 1:
-              raise SystemExit(
-                  f'Expected exactly one Behind the Sound cross-check label; found {count}'
-              )
-
-          text = text.replace(old, new, 1)
-          path.write_text(text)
-          PYCROSS
-
-          python3 /tmp/cross_check_copy_patch.py
-          rm -f /tmp/cross_check_copy_patch.py
-
-          grep -Fq 'Cross-check: agrees with primary measurement · 100 ms hops ' \
-            app/src/main/java/com/prettypink/player/MainActivity.java
-
-          # Prove the existing verification-failure path is still present.
-          grep -R -Fq 'Measurement verification disagreed' app/src/main/java
-
-          echo 'PASS existing lightweight verifier preserved; Behind the Sound now states agreement explicitly'
 
       - name: Publish current album art through MediaSession
         shell: bash
@@ -917,13 +884,79 @@ jobs:
           fi
           echo 'PASS Now Playing reuses the exact home HeartMark brand'
 
+      - name: Restore explicit cross-check agreement in Behind the Sound
+        shell: bash
+        run: |
+          cat > /tmp/cross_check_copy_patch.py <<'PYCROSS'
+          from pathlib import Path
+
+          root = Path('app/src/main')
+          candidates = []
+
+          for p in root.rglob('*'):
+              if not p.is_file() or p.suffix.lower() not in {'.java', '.xml', '.kt'}:
+                  continue
+              try:
+                  text = p.read_text()
+              except UnicodeDecodeError:
+                  continue
+              count = text.count('Cross-check:')
+              if count:
+                  candidates.append((p, count, text))
+
+          total = sum(count for _, count, _ in candidates)
+          if total != 1:
+              detail = ', '.join(f'{p}:{count}' for p, count, _ in candidates) or 'none'
+              raise SystemExit(
+                  f'Expected exactly one Cross-check: UI fragment in app source; found {total} ({detail})'
+              )
+
+          path, _, text = candidates[0]
+
+          # This changes only the human-readable prefix. Whatever follows it
+          # (hop size, verification detail, punctuation) stays exactly as 1.1.8 wrote it.
+          old = 'Cross-check:'
+          new = 'Cross-check: agrees with primary measurement ·'
+          text = text.replace(old, new, 1)
+          path.write_text(text)
+
+          print(f'PASS patched Behind the Sound cross-check label in {path}')
+
+          # Confirm the established fail-closed verification path still exists.
+          disagreement_hits = []
+          for p in root.rglob('*'):
+              if not p.is_file() or p.suffix.lower() not in {'.java', '.xml', '.kt'}:
+                  continue
+              try:
+                  t = p.read_text()
+              except UnicodeDecodeError:
+                  continue
+              if 'Measurement verification disagreed' in t:
+                  disagreement_hits.append(str(p))
+
+          if not disagreement_hits:
+              raise SystemExit(
+                  'Existing measurement-disagreement failure path not found; refusing wording-only patch'
+              )
+
+          print('PASS existing measurement verification disagreement path preserved')
+          PYCROSS
+
+          python3 /tmp/cross_check_copy_patch.py
+          rm -f /tmp/cross_check_copy_patch.py
+
+          grep -R -Fq 'Cross-check: agrees with primary measurement ·' app/src/main
+          grep -R -Fq 'Measurement verification disagreed' app/src/main
+
+          echo 'PASS existing lightweight verifier preserved; Behind the Sound states agreement explicitly'
+
       - name: Prove exact DSP and untouched Java stayed unchanged
         shell: bash
         run: |
           sha256sum -c /tmp/java-before.sha256
           sha256sum -c /tmp/res-before.sha256
-          grep -Fq "applicationId 'com.prettypink.player.finalcandidatev6'" app/build.gradle
-          grep -Fq "versionName '1.1.8-final-candidate-v6'" app/build.gradle
+          grep -Fq "applicationId 'com.prettypink.player.finalcandidatev7'" app/build.gradle
+          grep -Fq "versionName '1.1.8-final-candidate-v7'" app/build.gradle
           grep -Fq 'android:icon="@mipmap/launcher"' app/src/main/AndroidManifest.xml
           grep -Fq 'android:roundIcon="@mipmap/launcher"' app/src/main/AndroidManifest.xml
           grep -Fq '@drawable/launcher_pink_safe' app/src/main/res/mipmap-anydpi-v26/launcher.xml
@@ -956,16 +989,16 @@ jobs:
       - name: Name and hash APK
         shell: bash
         run: |
-          cp app/build/outputs/apk/debug/app-debug.apk Pretty-Pink-1.1.8-Final-Candidate-v6.apk
-          sha256sum Pretty-Pink-1.1.8-Final-Candidate-v6.apk > Pretty-Pink-1.1.8-Final-Candidate-v6.sha256
-          cat Pretty-Pink-1.1.8-Final-Candidate-v6.sha256
+          cp app/build/outputs/apk/debug/app-debug.apk Pretty-Pink-1.1.8-Final-Candidate-v7.apk
+          sha256sum Pretty-Pink-1.1.8-Final-Candidate-v7.apk > Pretty-Pink-1.1.8-Final-Candidate-v7.sha256
+          cat Pretty-Pink-1.1.8-Final-Candidate-v7.sha256
 
       - name: Upload APK and checksum
         uses: actions/upload-artifact@v4.6.2
         with:
-          name: Pretty-Pink-1.1.8-Final-Candidate-v6
+          name: Pretty-Pink-1.1.8-Final-Candidate-v7
           path: |
-            Pretty-Pink-1.1.8-Final-Candidate-v6.apk
-            Pretty-Pink-1.1.8-Final-Candidate-v6.sha256
+            Pretty-Pink-1.1.8-Final-Candidate-v7.apk
+            Pretty-Pink-1.1.8-Final-Candidate-v7.sha256
           if-no-files-found: error
           retention-days: 7
