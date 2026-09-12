@@ -1,4 +1,4 @@
-name: Pretty Pink 1.1.8 Final Candidate v4
+name: Pretty Pink 1.1.8 Final Candidate v5
 
 on:
   workflow_dispatch:
@@ -135,7 +135,7 @@ jobs:
 
           s, n = re.subn(
               r"applicationId\s+'com\.prettypink\.player\.earguard'",
-              "applicationId 'com.prettypink.player.finalcandidatev4'",
+              "applicationId 'com.prettypink.player.finalcandidatev5'",
               s, count=1
           )
           if n != 1:
@@ -145,11 +145,11 @@ jobs:
           if not m:
               raise SystemExit('Could not locate versionCode')
           s = re.sub(r'versionCode\s+\d+',
-                     f'versionCode {int(m.group(1)) + 11}', s, count=1)
+                     f'versionCode {int(m.group(1)) + 12}', s, count=1)
 
           s, n = re.subn(
               r"versionName\s+'1\.1\.8-ear-guard-candidate'",
-              "versionName '1.1.8-final-candidate-v4'",
+              "versionName '1.1.8-final-candidate-v5'",
               s, count=1
           )
           if n != 1:
@@ -238,7 +238,7 @@ jobs:
           (adaptive / 'launcher_round.xml').write_text(adaptive_xml)
 
           Path('RELEASE-CANDIDATE-1-NOTES.md').write_text(
-              '# Pretty Pink 1.1.8 Final Candidate v4\n\n'
+              '# Pretty Pink 1.1.8 Final Candidate v5\n\n'
               'This is a true two-layer adaptive icon. The full launcher tile is '
               'a matching Pretty Pink background. David and Jane’s exact source '
               'art is preserved as a separate transparent-corner foreground with '
@@ -618,10 +618,50 @@ jobs:
               if n != 1:
                   raise SystemExit(f'Could not reverse-verify inserted block {start_marker}')
 
-          # Ignore only blank-line placement introduced by block removal.
-          norm = lambda x: '\n'.join(line.rstrip() for line in x.splitlines() if line.strip())
-          if norm(restored) != norm(before):
-              raise SystemExit('PlayerService changed outside the three approved media-art insertions')
+          # Removing an inserted block may move code that originally followed
+          # a semicolon onto the next source line. Compare Java while ignoring
+          # formatting whitespace OUTSIDE quoted string/char literals, but keep
+          # literal contents exact. This still fails on any substantive code/text
+          # change outside our two explicitly marked blocks.
+          def canonical_java(source):
+              out = []
+              mode = 'code'
+              escape = False
+              i = 0
+              while i < len(source):
+                  ch = source[i]
+                  if mode == 'string':
+                      out.append(ch)
+                      if escape:
+                          escape = False
+                      elif ch == '\\':
+                          escape = True
+                      elif ch == '"':
+                          mode = 'code'
+                  elif mode == 'char':
+                      out.append(ch)
+                      if escape:
+                          escape = False
+                      elif ch == '\\':
+                          escape = True
+                      elif ch == "'":
+                          mode = 'code'
+                  else:
+                      if ch == '"':
+                          mode = 'string'
+                          out.append(ch)
+                      elif ch == "'":
+                          mode = 'char'
+                          out.append(ch)
+                      elif not ch.isspace():
+                          out.append(ch)
+                  i += 1
+              if mode != 'code':
+                  raise SystemExit('Unterminated Java literal during reverse verification')
+              return ''.join(out)
+
+          if canonical_java(restored) != canonical_java(before):
+              raise SystemExit('PlayerService changed outside the two approved media-art insertions')
 
           path.write_text(text)
           PYMEDIA
@@ -786,8 +826,8 @@ jobs:
         run: |
           sha256sum -c /tmp/java-before.sha256
           sha256sum -c /tmp/res-before.sha256
-          grep -Fq "applicationId 'com.prettypink.player.finalcandidatev4'" app/build.gradle
-          grep -Fq "versionName '1.1.8-final-candidate-v4'" app/build.gradle
+          grep -Fq "applicationId 'com.prettypink.player.finalcandidatev5'" app/build.gradle
+          grep -Fq "versionName '1.1.8-final-candidate-v5'" app/build.gradle
           grep -Fq 'android:icon="@mipmap/launcher"' app/src/main/AndroidManifest.xml
           grep -Fq 'android:roundIcon="@mipmap/launcher"' app/src/main/AndroidManifest.xml
           grep -Fq '@drawable/launcher_pink_safe' app/src/main/res/mipmap-anydpi-v26/launcher.xml
